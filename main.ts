@@ -9,6 +9,7 @@ import {
   Setting,
   Modal,
   Notice,
+  Menu,
 } from "obsidian";
 
 const VIEW_TYPE = "note-gallery";
@@ -178,54 +179,27 @@ class CreateFolderModal extends Modal {
 // ── Context Menu ─────────────────────────────────────────────────────────────
 
 function showContextMenu(
+  app: App,
   e: MouseEvent | TouchEvent,
   items: { label: string; icon?: string; danger?: boolean; action: () => void }[]
 ) {
-  // Remove existing menus
-  document.querySelectorAll(".note-gallery-context-menu").forEach(el => el.remove());
-
-  const menu = document.createElement("div");
-  menu.className = "note-gallery-context-menu";
-
-  let x = 0, y = 0;
-  if (e instanceof MouseEvent) {
-    x = e.clientX;
-    y = e.clientY;
-  } else if (e.touches.length > 0) {
-    x = e.touches[0].clientX;
-    y = e.touches[0].clientY;
-  }
-
-  menu.style.left = x + "px";
-  menu.style.top = y + "px";
+  const menu = new Menu();
 
   for (const item of items) {
-    const el = document.createElement("div");
-    el.className = "note-gallery-context-item" + (item.danger ? " note-gallery-context-item--danger" : "");
-    el.textContent = (item.icon ? item.icon + " " : "") + item.label;
-    el.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      menu.remove();
-      item.action();
+    menu.addItem((menuItem) => {
+      menuItem.setTitle(item.label);
+      if (item.icon) menuItem.setIcon(item.icon);
+      if (item.danger) menuItem.setWarning(true);
+      menuItem.onClick(() => item.action());
     });
-    menu.appendChild(el);
   }
 
-  document.body.appendChild(menu);
-
-  // Adjust position if off-screen
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = (x - rect.width) + "px";
-  if (rect.bottom > window.innerHeight) menu.style.top = (y - rect.height) + "px";
-
-  // Close on outside click
-  const close = (ev: MouseEvent) => {
-    if (!menu.contains(ev.target as Node)) {
-      menu.remove();
-      document.removeEventListener("click", close);
-    }
-  };
-  setTimeout(() => document.addEventListener("click", close), 50);
+  if (e instanceof MouseEvent) {
+    menu.showAtMouseEvent(e);
+  } else {
+    const touch = e.touches[0] || e.changedTouches[0];
+    menu.showAtPosition({ x: touch.clientX, y: touch.clientY });
+  }
 }
 
 // ── View ─────────────────────────────────────────────────────────────────────
@@ -351,15 +325,15 @@ class NoteGalleryView extends ItemView {
     newBtn.title = "Aktionen";
     newBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      showContextMenu(e, [
+      showContextMenu(this.app, e, [
         {
           label: "Zuletzt geöffnet",
-          icon: "🕐",
+          icon: "clock",
           action: () => { this.mode = "recent"; this.searchQuery = ""; this.render(); }
         },
         {
           label: "Neues Dokument",
-          icon: "📄",
+          icon: "file-plus",
           action: async () => {
             const name = `Neue Notiz ${new Date().toLocaleDateString("de-DE")}`;
             const path = this.folder.path + "/" + name + ".md";
@@ -369,12 +343,12 @@ class NoteGalleryView extends ItemView {
         },
         {
           label: "Favoriten",
-          icon: "⭐",
+          icon: "star",
           action: () => { this.mode = "favorites"; this.searchQuery = ""; this.render(); }
         },
         {
           label: "Ordner erstellen",
-          icon: "📁",
+          icon: "folder-plus",
           action: () => {
             new CreateFolderModal(this.app, this.folder.path, async (name) => {
               const path = this.folder.path + "/" + name;
@@ -556,10 +530,10 @@ class NoteGalleryView extends ItemView {
     const openCardMenu = (e: MouseEvent | TouchEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      showContextMenu(e, [
+      showContextMenu(this.app, e, [
         {
           label: favorite ? "Favorit entfernen" : "Favorit hinzufügen",
-          icon: "⭐",
+          icon: "star",
           action: async () => {
             await this.app.fileManager.processFrontMatter(file, (fm) => {
               if (favorite) delete fm.favorite;
@@ -570,7 +544,7 @@ class NoteGalleryView extends ItemView {
         },
         {
           label: "Umbenennen",
-          icon: "✏️",
+          icon: "pencil",
           action: () => {
             new RenameModal(this.app, file, async (newName) => {
               const newPath = file.parent?.path + "/" + newName + ".md";
@@ -581,7 +555,7 @@ class NoteGalleryView extends ItemView {
         },
         {
           label: "Löschen",
-          icon: "✕",
+          icon: "trash",
           danger: true,
           action: () => {
             new ConfirmDeleteModal(this.app, file.basename, async () => {
@@ -941,31 +915,11 @@ export default class NoteGalleryPlugin extends Plugin {
         margin-top: 8px;
         box-sizing: border-box;
       }
-      .note-gallery-context-menu {
-        position: fixed;
-        background: var(--background-primary);
-        border: 1px solid var(--background-modifier-border);
-        border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-        z-index: 1000;
-        min-width: 180px;
-        overflow: hidden;
-      }
-      .note-gallery-context-item {
-        padding: 10px 16px;
-        cursor: pointer;
-        font-size: 14px;
-        color: var(--text-normal);
-        transition: background 0.1s;
-      }
-      .note-gallery-context-item:hover { background: var(--background-modifier-hover); }
-      .note-gallery-context-item--danger { color: var(--text-error); }
     `;
     document.head.appendChild(style);
   }
 
   onunload() {
     document.getElementById("note-gallery-styles")?.remove();
-    document.querySelectorAll(".note-gallery-context-menu").forEach(el => el.remove());
   }
 }
