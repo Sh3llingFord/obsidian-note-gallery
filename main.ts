@@ -398,6 +398,9 @@ class NoteGalleryView extends ItemView {
         this.app.workspace.getLeaf(false).openFile(file);
       });
     }
+
+    // Spacer to prevent last note being hidden behind nav bar
+    listContainer.createDiv({ cls: "note-gallery-list-spacer" });
   }
 }
 
@@ -616,7 +619,10 @@ export default class NoteGalleryPlugin extends Plugin {
       .note-gallery-list {
         overflow-y: auto;
         flex: 1;
-        padding: 6px 0;
+        padding: 6px 0 0 0;
+      }
+      .note-gallery-list-spacer {
+        height: 120px;
       }
       .note-gallery-card {
         display: flex;
