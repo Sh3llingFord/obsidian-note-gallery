@@ -727,8 +727,8 @@ export default class NoteGalleryPlugin extends Plugin {
         position: absolute;
         bottom: 24px;
         left: 16px;
-        width: 44px;
-        height: 44px;
+        width: 50px;
+        height: 50px;
         border-radius: 50%;
         background: var(--interactive-accent);
         color: white;
