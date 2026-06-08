@@ -622,7 +622,7 @@ export default class NoteGalleryPlugin extends Plugin {
         padding: 6px 0 0 0;
       }
       .note-gallery-list-spacer {
-        height: 120px;
+        height: 80px;
       }
       .note-gallery-card {
         display: flex;
