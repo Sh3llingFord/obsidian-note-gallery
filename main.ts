@@ -397,6 +397,7 @@ class NoteGalleryView extends ItemView {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass("note-gallery-container");
+    container.style.height = container.parentElement?.clientHeight + "px";
 
     // ── Toolbar ──────────────────────────────────────────────
     const toolbar = container.createDiv({ cls: "note-gallery-toolbar" });
@@ -425,16 +426,32 @@ class NoteGalleryView extends ItemView {
     // Controls: search + action menu button
     const controls = toolbar.createDiv({ cls: "note-gallery-controls" });
 
-    const searchInput = controls.createEl("input", {
+    const searchWrapper = controls.createDiv({ cls: "note-gallery-search-wrapper" });
+    const searchInput = searchWrapper.createEl("input", {
       cls: "note-gallery-search",
       type: "text",
       placeholder: s.search,
     });
     searchInput.value = this.searchQuery;
+
+    const clearBtn = searchWrapper.createDiv({ cls: "note-gallery-search-clear" });
+    clearBtn.setText("✕");
+    clearBtn.style.display = this.searchQuery ? "flex" : "none";
+
     searchInput.addEventListener("input", async () => {
       this.searchQuery = searchInput.value;
+      clearBtn.style.display = this.searchQuery ? "flex" : "none";
       const lc = container.querySelector(".note-gallery-list") as HTMLElement;
       if (lc) await this.renderList(lc, filesFolder, dateLocale, sortBy, titleWrap, thumbnailSize);
+    });
+
+    clearBtn.addEventListener("click", async () => {
+      this.searchQuery = "";
+      searchInput.value = "";
+      clearBtn.style.display = "none";
+      const lc = container.querySelector(".note-gallery-list") as HTMLElement;
+      if (lc) await this.renderList(lc, filesFolder, dateLocale, sortBy, titleWrap, thumbnailSize);
+      searchInput.focus();
     });
 
     // + button → context menu
@@ -949,11 +966,7 @@ export default class NoteGalleryPlugin extends Plugin {
         padding: 0;
         display: flex;
         flex-direction: column;
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        height: 100%;
         overflow: hidden;
       }
       .note-gallery-toolbar {
@@ -982,14 +995,39 @@ export default class NoteGalleryPlugin extends Plugin {
         gap: 8px;
         align-items: center;
       }
-      .note-gallery-search {
+      .note-gallery-search-wrapper {
         flex: 1;
-        padding: 5px 10px;
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .note-gallery-search {
+        width: 100%;
+        padding: 5px 32px 5px 10px;
         border-radius: 6px;
         border: 1px solid var(--background-modifier-border);
         background: var(--background-secondary);
         color: var(--text-normal);
         font-size: 13px;
+        box-sizing: border-box;
+      }
+      .note-gallery-search-clear {
+        position: absolute;
+        right: 8px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        color: var(--background-primary);
+        font-size: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .note-gallery-search-clear:hover {
+        background: var(--text-normal);
       }
       .note-gallery-new-btn {
         width: 28px;
