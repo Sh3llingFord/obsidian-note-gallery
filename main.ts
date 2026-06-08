@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS: NoteGallerySettings = {
   backButtonPosition: "bottom-left",
 };
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function extractFirstImage(content: string): string | null {
   const wikiMatch = content.match(/!\[\[([^\]]+\.(png|jpg|jpeg|gif|webp))[^\]]*\]\]/i);
   if (wikiMatch) return wikiMatch[1];
@@ -40,13 +42,10 @@ function extractFirstImage(content: string): string | null {
 }
 
 function extractPreviewText(content: string): string {
-  // Remove frontmatter
   const withoutFrontmatter = content.replace(/^---[\s\S]*?---\n?/, "");
-  // Remove images
   const withoutImages = withoutFrontmatter
     .replace(/!\[\[[^\]]*\]\]/g, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "");
-  // Remove markdown syntax
   const plain = withoutImages
     .replace(/#{1,6}\s/g, "")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
@@ -71,17 +70,17 @@ function formatDate(frontmatter: Record<string, unknown>, file: TFile, locale: s
   if (raw) {
     const d = new Date(String(raw));
     if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString(locale, {
-        day: "2-digit", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit"
-      });
+      return d.toLocaleDateString(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
     }
   }
-  return new Date(file.stat.mtime).toLocaleDateString(locale, {
-    day: "2-digit", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit"
-  });
+  return new Date(file.stat.mtime).toLocaleDateString(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+
+function isFavorite(frontmatter: Record<string, unknown>): boolean {
+  return frontmatter?.favorite === true;
+}
+
+// ── Modals ───────────────────────────────────────────────────────────────────
 
 class ConfirmDeleteModal extends Modal {
   private fileName: string;
@@ -97,23 +96,139 @@ class ConfirmDeleteModal extends Modal {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "Notiz löschen?" });
     contentEl.createEl("p", { text: `"${this.fileName}" wird in den Papierkorb verschoben.` });
-
     const btnRow = contentEl.createDiv({ cls: "note-gallery-modal-buttons" });
-
     const cancelBtn = btnRow.createEl("button", { text: "Abbrechen" });
     cancelBtn.addEventListener("click", () => this.close());
-
     const deleteBtn = btnRow.createEl("button", { text: "Löschen", cls: "mod-warning" });
-    deleteBtn.addEventListener("click", () => {
-      this.onConfirm();
+    deleteBtn.addEventListener("click", () => { this.onConfirm(); this.close(); });
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+class RenameModal extends Modal {
+  private file: TFile;
+  private onConfirm: (newName: string) => void;
+
+  constructor(app: App, file: TFile, onConfirm: (newName: string) => void) {
+    super(app);
+    this.file = file;
+    this.onConfirm = onConfirm;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Notiz umbenennen" });
+    const input = contentEl.createEl("input", { type: "text", cls: "note-gallery-rename-input" });
+    input.value = this.file.basename;
+    input.select();
+    const btnRow = contentEl.createDiv({ cls: "note-gallery-modal-buttons" });
+    const cancelBtn = btnRow.createEl("button", { text: "Abbrechen" });
+    cancelBtn.addEventListener("click", () => this.close());
+    const confirmBtn = btnRow.createEl("button", { text: "Umbenennen", cls: "mod-cta" });
+    confirmBtn.addEventListener("click", () => {
+      const newName = input.value.trim();
+      if (newName && newName !== this.file.basename) {
+        this.onConfirm(newName);
+      }
       this.close();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") confirmBtn.click();
+      if (e.key === "Escape") this.close();
     });
   }
 
-  onClose() {
-    this.contentEl.empty();
-  }
+  onClose() { this.contentEl.empty(); }
 }
+
+class CreateFolderModal extends Modal {
+  private parentPath: string;
+  private onConfirm: (name: string) => void;
+
+  constructor(app: App, parentPath: string, onConfirm: (name: string) => void) {
+    super(app);
+    this.parentPath = parentPath;
+    this.onConfirm = onConfirm;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Neuen Ordner erstellen" });
+    const input = contentEl.createEl("input", { type: "text", cls: "note-gallery-rename-input", placeholder: "Ordnername" });
+    input.focus();
+    const btnRow = contentEl.createDiv({ cls: "note-gallery-modal-buttons" });
+    const cancelBtn = btnRow.createEl("button", { text: "Abbrechen" });
+    cancelBtn.addEventListener("click", () => this.close());
+    const confirmBtn = btnRow.createEl("button", { text: "Erstellen", cls: "mod-cta" });
+    confirmBtn.addEventListener("click", () => {
+      const name = input.value.trim();
+      if (name) { this.onConfirm(name); }
+      this.close();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") confirmBtn.click();
+      if (e.key === "Escape") this.close();
+    });
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+// ── Context Menu ─────────────────────────────────────────────────────────────
+
+function showContextMenu(
+  e: MouseEvent | TouchEvent,
+  items: { label: string; icon?: string; danger?: boolean; action: () => void }[]
+) {
+  // Remove existing menus
+  document.querySelectorAll(".note-gallery-context-menu").forEach(el => el.remove());
+
+  const menu = document.createElement("div");
+  menu.className = "note-gallery-context-menu";
+
+  let x = 0, y = 0;
+  if (e instanceof MouseEvent) {
+    x = e.clientX;
+    y = e.clientY;
+  } else if (e.touches.length > 0) {
+    x = e.touches[0].clientX;
+    y = e.touches[0].clientY;
+  }
+
+  menu.style.left = x + "px";
+  menu.style.top = y + "px";
+
+  for (const item of items) {
+    const el = document.createElement("div");
+    el.className = "note-gallery-context-item" + (item.danger ? " note-gallery-context-item--danger" : "");
+    el.textContent = (item.icon ? item.icon + " " : "") + item.label;
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      menu.remove();
+      item.action();
+    });
+    menu.appendChild(el);
+  }
+
+  document.body.appendChild(menu);
+
+  // Adjust position if off-screen
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (x - rect.width) + "px";
+  if (rect.bottom > window.innerHeight) menu.style.top = (y - rect.height) + "px";
+
+  // Close on outside click
+  const close = (ev: MouseEvent) => {
+    if (!menu.contains(ev.target as Node)) {
+      menu.remove();
+      document.removeEventListener("click", close);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", close), 50);
+}
+
+// ── View ─────────────────────────────────────────────────────────────────────
 
 class NoteGalleryView extends ItemView {
   folder: TFolder;
@@ -121,6 +236,7 @@ class NoteGalleryView extends ItemView {
   private folderPath: string = "";
   private searchQuery: string = "";
   private breadcrumb: TFolder[] = [];
+  private mode: "folder" | "recent" | "favorites" = "folder";
 
   constructor(leaf: WorkspaceLeaf, folder: TFolder, plugin: NoteGalleryPlugin) {
     super(leaf);
@@ -129,11 +245,7 @@ class NoteGalleryView extends ItemView {
   }
 
   getViewType() { return VIEW_TYPE; }
-
-  getDisplayText() {
-    return "Note Gallery";
-  }
-
+  getDisplayText() { return "Note Gallery"; }
   getIcon() { return "layout-grid"; }
 
   getState(): Record<string, unknown> {
@@ -165,6 +277,7 @@ class NoteGalleryView extends ItemView {
   }
 
   async navigateTo(folder: TFolder) {
+    this.mode = "folder";
     this.folder = folder;
     this.folderPath = folder.path;
     this.breadcrumb = this.buildBreadcrumb(folder);
@@ -173,34 +286,18 @@ class NoteGalleryView extends ItemView {
   }
 
   async onOpen() {
-    this.registerEvent(
-      this.app.vault.on("modify", async (file) => {
-        if (file instanceof TFile && file.parent?.path === this.folder?.path) {
-          await this.render();
-        }
-      })
-    );
-    this.registerEvent(
-      this.app.vault.on("create", async (file) => {
-        if (file instanceof TFile && file.parent?.path === this.folder?.path) {
-          await this.render();
-        }
-      })
-    );
-    this.registerEvent(
-      this.app.vault.on("delete", async (file) => {
-        if (file instanceof TFile && file.parent?.path === this.folder?.path) {
-          await this.render();
-        }
-      })
-    );
-    this.registerEvent(
-      this.app.vault.on("rename", async (file) => {
-        if (file instanceof TFile && file.parent?.path === this.folder?.path) {
-          await this.render();
-        }
-      })
-    );
+    this.registerEvent(this.app.vault.on("modify", async (file) => {
+      if (file instanceof TFile && file.parent?.path === this.folder?.path) await this.render();
+    }));
+    this.registerEvent(this.app.vault.on("create", async (file) => {
+      if (file instanceof TFile && file.parent?.path === this.folder?.path) await this.render();
+    }));
+    this.registerEvent(this.app.vault.on("delete", async (file) => {
+      if (file instanceof TFile && file.parent?.path === this.folder?.path) await this.render();
+    }));
+    this.registerEvent(this.app.vault.on("rename", async (file) => {
+      if (file instanceof TFile && file.parent?.path === this.folder?.path) await this.render();
+    }));
     await this.render();
   }
 
@@ -216,18 +313,26 @@ class NoteGalleryView extends ItemView {
     // ── Toolbar ──────────────────────────────────────────────
     const toolbar = container.createDiv({ cls: "note-gallery-toolbar" });
 
-    // Breadcrumb
-    const breadcrumbEl = toolbar.createDiv({ cls: "note-gallery-breadcrumb" });
-    this.breadcrumb.forEach((crumb, i) => {
-      if (i > 0) breadcrumbEl.createSpan({ cls: "note-gallery-breadcrumb-sep", text: " / " });
-      const crumbEl = breadcrumbEl.createSpan({ cls: "note-gallery-breadcrumb-item", text: crumb.name || "Vault" });
-      if (i < this.breadcrumb.length - 1) {
-        crumbEl.addClass("note-gallery-breadcrumb-link");
-        crumbEl.addEventListener("click", () => this.navigateTo(crumb));
-      }
-    });
+    // Breadcrumb (only in folder mode)
+    if (this.mode === "folder") {
+      const breadcrumbEl = toolbar.createDiv({ cls: "note-gallery-breadcrumb" });
+      this.breadcrumb.forEach((crumb, i) => {
+        if (i > 0) breadcrumbEl.createSpan({ cls: "note-gallery-breadcrumb-sep", text: " / " });
+        const crumbEl = breadcrumbEl.createSpan({ cls: "note-gallery-breadcrumb-item", text: crumb.name || "Vault" });
+        if (i < this.breadcrumb.length - 1) {
+          crumbEl.addClass("note-gallery-breadcrumb-link");
+          crumbEl.addEventListener("click", () => this.navigateTo(crumb));
+        }
+      });
+    } else {
+      const modeLabel = toolbar.createDiv({ cls: "note-gallery-breadcrumb" });
+      modeLabel.createSpan({ cls: "note-gallery-breadcrumb-link", text: "← Ordner" })
+        .addEventListener("click", () => { this.mode = "folder"; this.render(); });
+      modeLabel.createSpan({ cls: "note-gallery-breadcrumb-sep", text: " / " });
+      modeLabel.createSpan({ text: this.mode === "recent" ? "Zuletzt geöffnet" : "Favoriten" });
+    }
 
-    // Searchfield + New Note button
+    // Controls: search + action menu button
     const controls = toolbar.createDiv({ cls: "note-gallery-controls" });
 
     const searchInput = controls.createEl("input", {
@@ -241,13 +346,44 @@ class NoteGalleryView extends ItemView {
       await this.renderList(listContainer, filesFolder, dateLocale, sortBy, titleWrap, thumbnailSize);
     });
 
+    // + button → context menu
     const newBtn = controls.createEl("button", { cls: "note-gallery-new-btn", text: "+" });
-    newBtn.title = "Neue Notiz";
-    newBtn.addEventListener("click", async () => {
-      const name = `Neue Notiz ${new Date().toLocaleDateString("de-DE")}`;
-      const path = this.folder.path + "/" + name + ".md";
-      const file = await this.app.vault.create(path, "");
-      await this.app.workspace.getLeaf(false).openFile(file);
+    newBtn.title = "Aktionen";
+    newBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showContextMenu(e, [
+        {
+          label: "Zuletzt geöffnet",
+          icon: "🕐",
+          action: () => { this.mode = "recent"; this.searchQuery = ""; this.render(); }
+        },
+        {
+          label: "Neues Dokument",
+          icon: "📄",
+          action: async () => {
+            const name = `Neue Notiz ${new Date().toLocaleDateString("de-DE")}`;
+            const path = this.folder.path + "/" + name + ".md";
+            const file = await this.app.vault.create(path, "");
+            await this.app.workspace.getLeaf(false).openFile(file);
+          }
+        },
+        {
+          label: "Favoriten",
+          icon: "⭐",
+          action: () => { this.mode = "favorites"; this.searchQuery = ""; this.render(); }
+        },
+        {
+          label: "Ordner erstellen",
+          icon: "📁",
+          action: () => {
+            new CreateFolderModal(this.app, this.folder.path, async (name) => {
+              const path = this.folder.path + "/" + name;
+              await this.app.vault.createFolder(path);
+              await this.render();
+            }).open();
+          }
+        },
+      ]);
     });
 
     // ── List ────────────────────────────────────────────────
@@ -256,17 +392,13 @@ class NoteGalleryView extends ItemView {
 
     // ── Floating Back Button ─────────────────────────────────
     const isRoot = !this.folder.parent || this.folder.path === "/";
-    if (!isRoot) {
+    if (!isRoot && this.mode === "folder") {
       const backBtn = container.createDiv({ cls: "note-gallery-back-btn" });
       backBtn.setText("←");
       backBtn.title = "Zurück";
-      if (backButtonPosition === "bottom-right") {
-        backBtn.addClass("note-gallery-back-btn--right");
-      }
+      if (backButtonPosition === "bottom-right") backBtn.addClass("note-gallery-back-btn--right");
       backBtn.addEventListener("click", () => {
-        if (this.folder.parent) {
-          this.navigateTo(this.folder.parent);
-        }
+        if (this.folder.parent) this.navigateTo(this.folder.parent);
       });
     }
   }
@@ -283,7 +415,39 @@ class NoteGalleryView extends ItemView {
 
     const q = this.searchQuery.toLowerCase();
 
-    // ── Subfolders ──────────────────────────────────────────
+    // ── Recent / Favorites mode ──────────────────────────────
+    if (this.mode === "recent" || this.mode === "favorites") {
+      let files = this.app.vault.getMarkdownFiles();
+
+      if (this.mode === "recent") {
+        files = files.sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, 30);
+      } else {
+        files = files.filter(f => {
+          const cache = this.app.metadataCache.getFileCache(f);
+          return isFavorite((cache?.frontmatter ?? {}) as Record<string, unknown>);
+        });
+      }
+
+      if (q) files = files.filter(f => f.basename.toLowerCase().includes(q));
+
+      // Counter
+      const toolbar = this.containerEl.querySelector(".note-gallery-toolbar") as HTMLElement;
+      const existingCounter = toolbar?.querySelector(".note-gallery-counter");
+      if (existingCounter) existingCounter.remove();
+      if (toolbar) {
+        const counter = toolbar.createDiv({ cls: "note-gallery-counter" });
+        counter.setText(files.length + " Notizen");
+      }
+
+      for (const file of files) {
+        await this.renderNoteCard(listContainer, file, filesFolder, dateLocale, titleWrap, thumbnailSize);
+      }
+
+      listContainer.createDiv({ cls: "note-gallery-list-spacer" });
+      return;
+    }
+
+    // ── Folder mode ──────────────────────────────────────────
     const subfolders = this.folder.children
       .filter((f): f is TFolder => f instanceof TFolder)
       .filter(f => !q || f.name.toLowerCase().includes(q))
@@ -291,22 +455,17 @@ class NoteGalleryView extends ItemView {
 
     for (const subfolder of subfolders) {
       const card = listContainer.createDiv({ cls: "note-gallery-card note-gallery-folder-card" });
-
       const chevron = card.createDiv({ cls: "note-gallery-folder-chevron" });
       chevron.setText("›");
-
       const textDiv = card.createDiv({ cls: "note-gallery-text" });
       textDiv.createDiv({ cls: "note-gallery-title note-gallery-folder-title", text: subfolder.name });
-
       const fileCount = subfolder.children.filter(f => f instanceof TFile && (f as TFile).extension === "md").length;
       const folderCount = subfolder.children.filter(f => f instanceof TFolder).length;
       const meta = [fileCount + " Notizen", folderCount > 0 ? folderCount + " Unterordner" : ""].filter(Boolean).join(" · ");
       textDiv.createDiv({ cls: "note-gallery-date", text: meta });
-
       card.addEventListener("click", () => this.navigateTo(subfolder));
     }
 
-    // ── Notes ───────────────────────────────────────────────
     let files = this.folder.children
       .filter((f): f is TFile => f instanceof TFile && f.extension === "md")
       .filter(f => !q || f.basename.toLowerCase().includes(q));
@@ -317,7 +476,7 @@ class NoteGalleryView extends ItemView {
       return b.stat.mtime - a.stat.mtime;
     });
 
-    // Counter in toolbar
+    // Counter
     const toolbar = this.containerEl.querySelector(".note-gallery-toolbar") as HTMLElement;
     const existingCounter = toolbar?.querySelector(".note-gallery-counter");
     if (existingCounter) existingCounter.remove();
@@ -327,82 +486,133 @@ class NoteGalleryView extends ItemView {
     }
 
     for (const file of files) {
-      const content = await this.app.vault.read(file);
-      const cache = this.app.metadataCache.getFileCache(file);
-      const frontmatter = (cache?.frontmatter ?? {}) as Record<string, unknown>;
-
-      const imgPath = extractFirstImage(content);
-      const previewText = extractPreviewText(content);
-      const category = extractCategories(frontmatter);
-      const dateStr = formatDate(frontmatter, file, dateLocale);
-
-      const card = listContainer.createDiv({ cls: "note-gallery-card" });
-
-      // Left: text
-      const textDiv = card.createDiv({ cls: "note-gallery-text" });
-      const titleEl = textDiv.createDiv({ cls: "note-gallery-title" });
-      titleEl.setText(file.basename);
-      if (titleWrap) titleEl.addClass("note-gallery-title--wrap");
-
-      if (category) textDiv.createDiv({ cls: "note-gallery-category", text: category });
-      textDiv.createDiv({ cls: "note-gallery-date", text: dateStr });
-
-      // Preview text (shown on hover)
-      if (previewText) {
-        const preview = textDiv.createDiv({ cls: "note-gallery-preview", text: previewText });
-      }
-
-      // Right: image
-      if (imgPath) {
-        const imgDiv = card.createDiv({ cls: "note-gallery-thumb" });
-        imgDiv.style.width = thumbnailSize + "px";
-        imgDiv.style.height = thumbnailSize + "px";
-
-        const pathsToTry = [
-          imgPath,
-          filesFolder + "/" + imgPath.split("/").pop(),
-          "Vault/" + imgPath,
-          "Vault/" + filesFolder + "/" + imgPath.split("/").pop(),
-          file.parent?.path + "/" + imgPath,
-        ].filter(Boolean) as string[];
-
-        let imgFile: TFile | null = null;
-        for (const p of pathsToTry) {
-          const found = this.app.vault.getAbstractFileByPath(p);
-          if (found instanceof TFile) { imgFile = found; break; }
-        }
-
-        if (imgFile) {
-          const url = this.app.vault.getResourcePath(imgFile);
-          const img = imgDiv.createEl("img");
-          img.src = url;
-          img.alt = file.basename;
-        }
-      }
-
-      // Delete button
-      const deleteBtn = card.createDiv({ cls: "note-gallery-delete-btn" });
-      deleteBtn.setText("✕");
-      deleteBtn.title = "Löschen";
-      deleteBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        new ConfirmDeleteModal(this.app, file.basename, async () => {
-          await this.app.vault.trash(file, true);
-          new Notice(`"${file.basename}" gelöscht`);
-          await this.render();
-        }).open();
-      });
-
-      // Open note on click
-      card.addEventListener("click", () => {
-        this.app.workspace.getLeaf(false).openFile(file);
-      });
+      await this.renderNoteCard(listContainer, file, filesFolder, dateLocale, titleWrap, thumbnailSize);
     }
 
-    // Spacer to prevent last note being hidden behind nav bar
     listContainer.createDiv({ cls: "note-gallery-list-spacer" });
   }
+
+  async renderNoteCard(
+    listContainer: HTMLElement,
+    file: TFile,
+    filesFolder: string,
+    dateLocale: string,
+    titleWrap: boolean,
+    thumbnailSize: number
+  ) {
+    const content = await this.app.vault.read(file);
+    const cache = this.app.metadataCache.getFileCache(file);
+    const frontmatter = (cache?.frontmatter ?? {}) as Record<string, unknown>;
+
+    const imgPath = extractFirstImage(content);
+    const previewText = extractPreviewText(content);
+    const category = extractCategories(frontmatter);
+    const dateStr = formatDate(frontmatter, file, dateLocale);
+    const favorite = isFavorite(frontmatter);
+
+    const card = listContainer.createDiv({ cls: "note-gallery-card" });
+
+    // Left: text
+    const textDiv = card.createDiv({ cls: "note-gallery-text" });
+    const titleRow = textDiv.createDiv({ cls: "note-gallery-title-row" });
+    if (favorite) titleRow.createSpan({ cls: "note-gallery-favorite-star", text: "⭐ " });
+    const titleEl = titleRow.createSpan({ cls: "note-gallery-title" });
+    titleEl.setText(file.basename);
+    if (titleWrap) titleEl.addClass("note-gallery-title--wrap");
+
+    if (category) textDiv.createDiv({ cls: "note-gallery-category", text: category });
+    textDiv.createDiv({ cls: "note-gallery-date", text: dateStr });
+    if (previewText) textDiv.createDiv({ cls: "note-gallery-preview", text: previewText });
+
+    // Right: image
+    if (imgPath) {
+      const imgDiv = card.createDiv({ cls: "note-gallery-thumb" });
+      imgDiv.style.width = thumbnailSize + "px";
+      imgDiv.style.height = thumbnailSize + "px";
+
+      const pathsToTry = [
+        imgPath,
+        filesFolder + "/" + imgPath.split("/").pop(),
+        "Vault/" + imgPath,
+        "Vault/" + filesFolder + "/" + imgPath.split("/").pop(),
+        file.parent?.path + "/" + imgPath,
+      ].filter(Boolean) as string[];
+
+      let imgFile: TFile | null = null;
+      for (const p of pathsToTry) {
+        const found = this.app.vault.getAbstractFileByPath(p);
+        if (found instanceof TFile) { imgFile = found; break; }
+      }
+
+      if (imgFile) {
+        const url = this.app.vault.getResourcePath(imgFile);
+        const img = imgDiv.createEl("img");
+        img.src = url;
+        img.alt = file.basename;
+      }
+    }
+
+    // Long-press (mobile) / right-click (desktop) → context menu
+    const openCardMenu = (e: MouseEvent | TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showContextMenu(e, [
+        {
+          label: favorite ? "Favorit entfernen" : "Favorit hinzufügen",
+          icon: "⭐",
+          action: async () => {
+            await this.app.fileManager.processFrontMatter(file, (fm) => {
+              if (favorite) delete fm.favorite;
+              else fm.favorite = true;
+            });
+            await this.render();
+          }
+        },
+        {
+          label: "Umbenennen",
+          icon: "✏️",
+          action: () => {
+            new RenameModal(this.app, file, async (newName) => {
+              const newPath = file.parent?.path + "/" + newName + ".md";
+              await this.app.fileManager.renameFile(file, newPath);
+              await this.render();
+            }).open();
+          }
+        },
+        {
+          label: "Löschen",
+          icon: "✕",
+          danger: true,
+          action: () => {
+            new ConfirmDeleteModal(this.app, file.basename, async () => {
+              await this.app.vault.trash(file, true);
+              new Notice(`"${file.basename}" gelöscht`);
+              await this.render();
+            }).open();
+          }
+        },
+      ]);
+    };
+
+    // Desktop: right-click
+    card.addEventListener("contextmenu", (e) => openCardMenu(e));
+
+    // Mobile: long-press
+    let longPressTimer: ReturnType<typeof setTimeout>;
+    card.addEventListener("touchstart", (e) => {
+      longPressTimer = setTimeout(() => openCardMenu(e), 500);
+    }, { passive: true });
+    card.addEventListener("touchend", () => clearTimeout(longPressTimer));
+    card.addEventListener("touchmove", () => clearTimeout(longPressTimer));
+
+    // Open note on tap/click
+    card.addEventListener("click", () => {
+      this.app.workspace.getLeaf(false).openFile(file);
+    });
+  }
 }
+
+// ── Settings Tab ─────────────────────────────────────────────────────────────
 
 class NoteGallerySettingTab extends PluginSettingTab {
   plugin: NoteGalleryPlugin;
@@ -459,14 +669,10 @@ class NoteGallerySettingTab extends PluginSettingTab {
       .setName("Zurück-Button Position")
       .setDesc("Position des floating Zurück-Buttons für Unterordner-Navigation")
       .addDropdown(drop =>
-        drop
-          .addOption("bottom-left", "Unten links (Rechtshänder)")
+        drop.addOption("bottom-left", "Unten links (Rechtshänder)")
           .addOption("bottom-right", "Unten rechts (Linkshänder)")
           .setValue(this.plugin.settings.backButtonPosition)
-          .onChange(async (value) => {
-            this.plugin.settings.backButtonPosition = value as "bottom-left" | "bottom-right";
-            await this.plugin.saveSettings();
-          })
+          .onChange(async (value) => { this.plugin.settings.backButtonPosition = value as "bottom-left" | "bottom-right"; await this.plugin.saveSettings(); })
       );
 
     new Setting(containerEl)
@@ -478,6 +684,8 @@ class NoteGallerySettingTab extends PluginSettingTab {
       );
   }
 }
+
+// ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default class NoteGalleryPlugin extends Plugin {
   settings: NoteGallerySettings = DEFAULT_SETTINGS;
@@ -492,12 +700,10 @@ export default class NoteGalleryPlugin extends Plugin {
 
     this.addSettingTab(new NoteGallerySettingTab(this.app, this));
 
-    // Ribbon Icon
     this.addRibbonIcon("layout-grid", "Note Gallery öffnen", async () => {
       await this.openGallery(this.app.vault.getRoot());
     });
 
-    // Command
     this.addCommand({
       id: "open-note-gallery",
       name: "Note Gallery öffnen",
@@ -573,12 +779,8 @@ export default class NoteGalleryPlugin extends Plugin {
         color: var(--text-accent);
         cursor: pointer;
       }
-      .note-gallery-breadcrumb-link:hover {
-        text-decoration: underline;
-      }
-      .note-gallery-breadcrumb-sep {
-        color: var(--text-faint);
-      }
+      .note-gallery-breadcrumb-link:hover { text-decoration: underline; }
+      .note-gallery-breadcrumb-sep { color: var(--text-faint); }
       .note-gallery-controls {
         display: flex;
         gap: 8px;
@@ -608,9 +810,7 @@ export default class NoteGalleryPlugin extends Plugin {
         line-height: 1;
         padding: 0;
       }
-      .note-gallery-new-btn:hover {
-        background: var(--interactive-accent-hover);
-      }
+      .note-gallery-new-btn:hover { background: var(--interactive-accent-hover); }
       .note-gallery-counter {
         font-size: 11px;
         color: var(--text-faint);
@@ -621,9 +821,7 @@ export default class NoteGalleryPlugin extends Plugin {
         flex: 1;
         padding: 6px 0 0 0;
       }
-      .note-gallery-list-spacer {
-        height: 80px;
-      }
+      .note-gallery-list-spacer { height: 80px; }
       .note-gallery-card {
         display: flex;
         flex-direction: row;
@@ -635,21 +833,14 @@ export default class NoteGalleryPlugin extends Plugin {
         gap: 12px;
         position: relative;
       }
-      .note-gallery-card:hover {
-        background: var(--background-modifier-hover);
-      }
-      .note-gallery-folder-card {
-        background: transparent;
-      }
+      .note-gallery-card:hover { background: var(--background-modifier-hover); }
+      .note-gallery-folder-card { background: transparent; }
       .note-gallery-folder-chevron {
         font-size: 18px;
         color: var(--text-muted);
         width: 16px;
         flex-shrink: 0;
         line-height: 1;
-      }
-      .note-gallery-folder-title {
-        font-weight: 700;
       }
       .note-gallery-text {
         flex: 1;
@@ -658,6 +849,13 @@ export default class NoteGalleryPlugin extends Plugin {
         flex-direction: column;
         gap: 3px;
       }
+      .note-gallery-title-row {
+        display: flex;
+        align-items: baseline;
+        gap: 2px;
+        min-width: 0;
+      }
+      .note-gallery-favorite-star { font-size: 12px; }
       .note-gallery-title {
         font-size: 15px;
         font-weight: 600;
@@ -671,6 +869,7 @@ export default class NoteGalleryPlugin extends Plugin {
         overflow: visible;
         text-overflow: unset;
       }
+      .note-gallery-folder-title { font-weight: 700; }
       .note-gallery-category {
         font-size: 12px;
         color: var(--text-accent);
@@ -704,30 +903,6 @@ export default class NoteGalleryPlugin extends Plugin {
         height: 100%;
         object-fit: cover;
       }
-      .note-gallery-delete-btn {
-        position: absolute;
-        right: 12px;
-        top: 8px;
-        font-size: 14px;
-        opacity: 0.3;
-        cursor: pointer;
-        transition: opacity 0.15s, color 0.15s;
-        z-index: 2;
-        padding: 2px 4px;
-        border-radius: 4px;
-        color: var(--text-faint);
-      }
-      .note-gallery-delete-btn:hover {
-        opacity: 1 !important;
-        color: var(--text-error);
-        background: var(--background-modifier-error);
-      }
-      .note-gallery-modal-buttons {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-        margin-top: 16px;
-      }
       .note-gallery-back-btn {
         position: absolute;
         bottom: 22px;
@@ -746,22 +921,51 @@ export default class NoteGalleryPlugin extends Plugin {
         transition: background 0.15s, transform 0.1s;
         z-index: 20;
       }
-      .note-gallery-back-btn--right {
-        left: unset;
-        right: 16px;
+      .note-gallery-back-btn--right { left: unset; right: 16px; }
+      .note-gallery-back-btn:hover { background: var(--interactive-accent-hover); transform: scale(1.05); }
+      .note-gallery-back-btn:active { transform: scale(0.95); }
+      .note-gallery-modal-buttons {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 16px;
       }
-      .note-gallery-back-btn:hover {
-        background: var(--interactive-accent-hover);
-        transform: scale(1.05);
+      .note-gallery-rename-input {
+        width: 100%;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--background-modifier-border);
+        background: var(--background-secondary);
+        color: var(--text-normal);
+        font-size: 14px;
+        margin-top: 8px;
+        box-sizing: border-box;
       }
-      .note-gallery-back-btn:active {
-        transform: scale(0.95);
+      .note-gallery-context-menu {
+        position: fixed;
+        background: var(--background-primary);
+        border: 1px solid var(--background-modifier-border);
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        z-index: 1000;
+        min-width: 180px;
+        overflow: hidden;
       }
+      .note-gallery-context-item {
+        padding: 10px 16px;
+        cursor: pointer;
+        font-size: 14px;
+        color: var(--text-normal);
+        transition: background 0.1s;
+      }
+      .note-gallery-context-item:hover { background: var(--background-modifier-hover); }
+      .note-gallery-context-item--danger { color: var(--text-error); }
     `;
     document.head.appendChild(style);
   }
 
   onunload() {
     document.getElementById("note-gallery-styles")?.remove();
+    document.querySelectorAll(".note-gallery-context-menu").forEach(el => el.remove());
   }
 }
