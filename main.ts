@@ -950,6 +950,8 @@ export default class NoteGalleryPlugin extends Plugin {
         display: flex;
         flex-direction: column;
         height: 100%;
+        min-height: 0;
+        overflow: hidden;
       }
       .note-gallery-toolbar {
         padding: 10px 12px 6px;
@@ -1010,7 +1012,9 @@ export default class NoteGalleryPlugin extends Plugin {
       .note-gallery-list {
         overflow-y: auto;
         flex: 1;
+        min-height: 0;
         padding: 6px 0 0 0;
+        -webkit-overflow-scrolling: touch;
       }
       .note-gallery-list-spacer { height: 80px; }
       .note-gallery-card {
