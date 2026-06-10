@@ -1004,8 +1004,19 @@ class NoteGalleryView extends ItemView {
     card.addEventListener("touchmove", () => clearTimeout(longPressTimer));
 
     // Open note on tap/click
-    card.addEventListener("click", () => {
-      this.app.workspace.openLinkText(file.path, this.folder?.path ?? "", "tab");
+    card.addEventListener("click", async () => {
+      const newLeaf = this.app.workspace.getLeaf("tab");
+      await newLeaf.openFile(file);
+      // Inject gallery state into the new leaf's back history so the back
+      // button is active and returns to this gallery folder.
+      const leafHistory = (newLeaf as any).history;
+      if (leafHistory?.backHistory != null) {
+        leafHistory.backHistory = [{
+          state: { type: VIEW_TYPE, state: { folderPath: this.folder?.path ?? "" }, active: true },
+          eState: null,
+        }];
+        leafHistory.forwardHistory = [];
+      }
     });
   }
 
@@ -1091,8 +1102,17 @@ class NoteGalleryView extends ItemView {
     card.addEventListener("touchend", () => clearTimeout(longPressTimer));
     card.addEventListener("touchmove", () => clearTimeout(longPressTimer));
 
-    card.addEventListener("click", () => {
-      this.app.workspace.openLinkText(file.path, this.folder?.path ?? "", "tab");
+    card.addEventListener("click", async () => {
+      const newLeaf = this.app.workspace.getLeaf("tab");
+      await newLeaf.openFile(file);
+      const leafHistory = (newLeaf as any).history;
+      if (leafHistory?.backHistory != null) {
+        leafHistory.backHistory = [{
+          state: { type: VIEW_TYPE, state: { folderPath: this.folder?.path ?? "" }, active: true },
+          eState: null,
+        }];
+        leafHistory.forwardHistory = [];
+      }
     });
   }
 
