@@ -18,7 +18,7 @@ interface NoteGallerySettings {
   thumbnailSize: number;
   filesFolder: string;
   dateLocale: string;
-  sortBy: "modified" | "created" | "name";
+  sortBy: "modified-desc" | "modified-asc" | "created-desc" | "created-asc" | "name-asc" | "name-desc";
   titleWrap: boolean;
   language: "de" | "en";
   recentCount: number;
@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS: NoteGallerySettings = {
   thumbnailSize: 72,
   filesFolder: "Files",
   dateLocale: "de-DE",
-  sortBy: "modified",
+  sortBy: "modified-desc",
   titleWrap: false,
   language: "de",
   recentCount: 30,
@@ -82,11 +82,21 @@ const STRINGS = {
     stThumbSizeDesc: "Breite und Höhe des Vorschaubilds in Pixeln",
     stFilesFolder: "Dateien-Ordner",
     stFilesFolderDesc: "Pfad zum Ordner mit Bilddateien (relativ zum Vault-Root)",
+    sort: "Sortierung",
+    sortModifiedDesc: "Geändert (neu → alt)",
+    sortModifiedAsc: "Geändert (alt → neu)",
+    sortCreatedDesc: "Erstellt (neu → alt)",
+    sortCreatedAsc: "Erstellt (alt → neu)",
+    sortNameAsc: "Name (A–Z)",
+    sortNameDesc: "Name (Z–A)",
     stSortBy: "Sortierung",
-    stSortByDesc: "Notizen sortieren nach",
-    stSortModified: "Änderungsdatum (neueste zuerst)",
-    stSortCreated: "Erstelldatum (neueste zuerst)",
-    stSortName: "Name (A–Z)",
+    stSortByDesc: "Standard-Sortierung für neue Ansichten",
+    stSortModified: "Geändert (neu → alt)",
+    stSortCreatedDesc: "Erstellt (neu → alt)",
+    stSortCreatedAsc: "Erstellt (alt → neu)",
+    stSortModifiedAsc: "Geändert (alt → neu)",
+    stSortNameAsc: "Name (A–Z)",
+    stSortNameDesc: "Name (Z–A)",
     stDateLocale: "Datumsformat",
     stDateLocaleDesc: "Sprache für die Datumsanzeige",
     stTitleWrap: "Titel umbrechen",
@@ -147,11 +157,21 @@ const STRINGS = {
     stThumbSizeDesc: "Width and height of the preview image in pixels",
     stFilesFolder: "Files folder",
     stFilesFolderDesc: "Path to the folder with image files (relative to vault root)",
+    sort: "Sort",
+    sortModifiedDesc: "Modified (newest first)",
+    sortModifiedAsc: "Modified (oldest first)",
+    sortCreatedDesc: "Created (newest first)",
+    sortCreatedAsc: "Created (oldest first)",
+    sortNameAsc: "Name (A–Z)",
+    sortNameDesc: "Name (Z–A)",
     stSortBy: "Sort by",
-    stSortByDesc: "Criterion for sorting notes",
-    stSortModified: "Date modified (newest first)",
-    stSortCreated: "Date created (newest first)",
-    stSortName: "Name (A–Z)",
+    stSortByDesc: "Default sort for new views",
+    stSortModified: "Modified (newest first)",
+    stSortCreatedDesc: "Created (newest first)",
+    stSortCreatedAsc: "Created (oldest first)",
+    stSortModifiedAsc: "Modified (oldest first)",
+    stSortNameAsc: "Name (A–Z)",
+    stSortNameDesc: "Name (Z–A)",
     stDateLocale: "Date format",
     stDateLocaleDesc: "Language for date display",
     stTitleWrap: "Wrap title",
@@ -429,6 +449,7 @@ class NoteGalleryView extends ItemView {
   private searchQuery: string = "";
   private breadcrumb: TFolder[] = [];
   private mode: "folder" | "recent" | "favorites" = "folder";
+  private currentSort: string = "modified-desc";
   private _viewportCleanup?: () => void;
 
   constructor(leaf: WorkspaceLeaf, folder: TFolder, plugin: NoteGalleryPlugin) {
@@ -537,6 +558,7 @@ class NoteGalleryView extends ItemView {
   }
 
   async onOpen() {
+    this.currentSort = this.plugin.settings.sortBy;
     this.registerEvent(this.app.vault.on("modify", async (file) => {
       if (file instanceof TFile && file.parent?.path === this.folder?.path) await this.render();
     }));
@@ -558,7 +580,8 @@ class NoteGalleryView extends ItemView {
     this._viewportCleanup?.();
     this._viewportCleanup = undefined;
 
-    const { thumbnailSize, filesFolder, dateLocale, sortBy, titleWrap, language, breadcrumbFontSize } = this.plugin.settings;
+    const { thumbnailSize, filesFolder, dateLocale, titleWrap, language, breadcrumbFontSize } = this.plugin.settings;
+    const sortBy = this.currentSort;
     const s = STRINGS[language];
 
     const container = this.containerEl.children[1] as HTMLElement;
@@ -663,44 +686,61 @@ class NoteGalleryView extends ItemView {
     newBtn.title = s.actions;
     newBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      showContextMenu(this.app, e, [
-        {
-          label: s.favorites,
-          icon: "star",
-          action: () => { this.mode = "favorites"; this.searchQuery = ""; this.render(); }
-        },
-        {
-          label: s.recent,
-          icon: "clock",
-          action: () => { this.mode = "recent"; this.searchQuery = ""; this.render(); }
-        },
-        { separator: true },
-        {
-          label: s.newDoc,
-          icon: "file-plus",
-          action: async () => { await this.createNoteWithName(this.folder.path); }
-        },
-        {
-          label: s.createFolder,
-          icon: "folder-plus",
-          action: () => {
-            new CreateFolderModal(this.app, this.folder.path, s, async (name) => {
-              const path = this.folder.path + "/" + name;
-              await this.app.vault.createFolder(path);
-              await this.render();
-            }).open();
-          }
-        },
-        { separator: true },
-        {
-          label: s.openSettings,
-          icon: "settings",
-          action: () => {
-            (this.app as any).setting.open();
-            (this.app as any).setting.openTabById("visual-explorer");
-          }
-        },
-      ]);
+      const sortOptions: { value: string; label: string }[] = [
+        { value: "modified-desc", label: s.sortModifiedDesc },
+        { value: "modified-asc",  label: s.sortModifiedAsc },
+        { value: "created-desc",  label: s.sortCreatedDesc },
+        { value: "created-asc",   label: s.sortCreatedAsc },
+        { value: "name-asc",      label: s.sortNameAsc },
+        { value: "name-desc",     label: s.sortNameDesc },
+      ];
+      const menu = new Menu();
+      for (const opt of sortOptions) {
+        menu.addItem(item => {
+          item.setTitle(opt.label);
+          item.setIcon("arrow-up-down");
+          item.setChecked(this.currentSort === opt.value);
+          item.onClick(async () => {
+            this.currentSort = opt.value;
+            const lc = container.querySelector(".note-gallery-list") as HTMLElement;
+            if (lc) await this.renderList(lc, filesFolder, dateLocale, this.currentSort, titleWrap, thumbnailSize);
+          });
+        });
+      }
+      menu.addSeparator();
+      menu.addItem(item => {
+        item.setTitle(s.favorites).setIcon("star");
+        item.onClick(() => { this.mode = "favorites"; this.searchQuery = ""; this.render(); });
+      });
+      menu.addItem(item => {
+        item.setTitle(s.recent).setIcon("clock");
+        item.onClick(() => { this.mode = "recent"; this.searchQuery = ""; this.render(); });
+      });
+      menu.addSeparator();
+      menu.addItem(item => {
+        item.setTitle(s.newDoc).setIcon("file-plus");
+        item.onClick(async () => { await this.createNoteWithName(this.folder.path); });
+      });
+      menu.addItem(item => {
+        item.setTitle(s.createFolder).setIcon("folder-plus");
+        item.onClick(() => {
+          new CreateFolderModal(this.app, this.folder.path, s, async (name) => {
+            const path = this.folder.path + "/" + name;
+            await this.app.vault.createFolder(path);
+            await this.render();
+          }).open();
+        });
+      });
+      menu.addSeparator();
+      menu.addItem(item => {
+        item.setTitle(s.openSettings).setIcon("settings");
+        item.onClick(() => {
+          (this.app as any).setting.open();
+          (this.app as any).setting.openTabById("visual-explorer");
+        });
+      });
+      if (e instanceof MouseEvent) menu.showAtMouseEvent(e);
+      else { const t = e.touches[0] || e.changedTouches[0]; menu.showAtPosition({ x: t.clientX, y: t.clientY }); }
     });
   }
 
@@ -761,7 +801,9 @@ class NoteGalleryView extends ItemView {
     const subfolders = this.folder.children
       .filter((f): f is TFolder => f instanceof TFolder)
       .filter(f => !q || f.name.toLowerCase().includes(q))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => sortBy === "name-desc"
+        ? b.name.localeCompare(a.name)
+        : a.name.localeCompare(b.name));
 
     for (const subfolder of subfolders) {
       const card = listContainer.createDiv({ cls: "note-gallery-card note-gallery-folder-card" });
@@ -852,9 +894,12 @@ class NoteGalleryView extends ItemView {
       });
 
     files = files.sort((a, b) => {
-      if (sortBy === "name") return a.basename.localeCompare(b.basename);
-      if (sortBy === "created") return b.stat.ctime - a.stat.ctime;
-      return b.stat.mtime - a.stat.mtime;
+      if (sortBy === "name-asc")     return a.basename.localeCompare(b.basename);
+      if (sortBy === "name-desc")    return b.basename.localeCompare(a.basename);
+      if (sortBy === "created-asc")  return a.stat.ctime - b.stat.ctime;
+      if (sortBy === "created-desc") return b.stat.ctime - a.stat.ctime;
+      if (sortBy === "modified-asc") return a.stat.mtime - b.stat.mtime;
+      return b.stat.mtime - a.stat.mtime; // modified-desc (default)
     });
 
     if (this.plugin.settings.sortFavoritesFirst) {
@@ -1290,11 +1335,17 @@ class NoteGallerySettingTab extends PluginSettingTab {
       .setName(s.stSortBy)
       .setDesc(s.stSortByDesc)
       .addDropdown(drop =>
-        drop.addOption("modified", s.stSortModified)
-          .addOption("created", s.stSortCreated)
-          .addOption("name", s.stSortName)
+        drop.addOption("modified-desc", s.stSortModified)
+          .addOption("modified-asc",  s.stSortModifiedAsc)
+          .addOption("created-desc",  s.stSortCreatedDesc)
+          .addOption("created-asc",   s.stSortCreatedAsc)
+          .addOption("name-asc",      s.stSortNameAsc)
+          .addOption("name-desc",     s.stSortNameDesc)
           .setValue(this.plugin.settings.sortBy)
-          .onChange(async (value) => { this.plugin.settings.sortBy = value as "modified" | "created" | "name"; await this.plugin.saveSettings(); })
+          .onChange(async (value) => {
+            this.plugin.settings.sortBy = value as NoteGallerySettings["sortBy"];
+            await this.plugin.saveSettings();
+          })
       );
 
     new Setting(containerEl)
@@ -1393,6 +1444,14 @@ export default class NoteGalleryPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const legacyMap: Record<string, NoteGallerySettings["sortBy"]> = {
+      modified: "modified-desc",
+      created: "created-desc",
+      name: "name-asc",
+    };
+    if (legacyMap[this.settings.sortBy as string]) {
+      this.settings.sortBy = legacyMap[this.settings.sortBy as string];
+    }
   }
 
   async saveSettings() {
