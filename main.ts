@@ -786,22 +786,19 @@ class NoteGalleryView extends ItemView {
             icon: "arrow-up-right",
             action: async () => {
               const newLeaf = this.app.workspace.getLeaf("tab");
-              // Set state WITHOUT activating so nav buttons haven't rendered yet
+              // Activate with parent first so Obsidian records a real navigation entry
               await newLeaf.setViewState({
                 type: VIEW_TYPE,
+                active: true,
+                state: { folderPath: this.folder?.path ?? "" },
+              });
+              // Navigate to subfolder — Obsidian pushes parent to backHistory natively
+              // and updates the back button visual state
+              await newLeaf.setViewState({
+                type: VIEW_TYPE,
+                active: true,
                 state: { folderPath: subfolder.path },
               });
-              // Inject history while leaf is still inactive
-              const leafHistory = (newLeaf as any).history;
-              if (leafHistory?.backHistory != null) {
-                leafHistory.backHistory = [{
-                  state: { type: VIEW_TYPE, state: { folderPath: this.folder?.path ?? "" }, active: true },
-                  eState: null,
-                }];
-                leafHistory.forwardHistory = [];
-              }
-              // Activate leaf now — Obsidian reads history when rendering nav buttons
-              this.app.workspace.setActiveLeaf(newLeaf, { focus: true });
             }
           },
           {
