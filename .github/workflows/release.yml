@@ -31,16 +31,15 @@ jobs:
         id: version
         run: echo "version=$(jq -r .version manifest.json)" >> $GITHUB_OUTPUT
 
-      - name: Delete existing release if exists
-        run: gh release delete ${{ steps.version.outputs.version }} --yes || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Create Release
-        run: |
-          gh release create ${{ steps.version.outputs.version }} \
-            main.js manifest.json styles.css \
-            --title "${{ steps.version.outputs.version }}" \
-            --notes "Build from commit ${{ github.sha }}"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          body: Build from commit ${{ github.sha }}
+          files: |
+            main.js
+            manifest.json
+            styles.css
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
